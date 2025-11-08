@@ -15,14 +15,15 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+type RawFeed interface {
+	RSS | Atom
+}
+
 type RSS struct {
 	Channel Channel `xml:"channel"`
 }
 
 type Channel struct {
-	Title       string    `xml:"title"`
-	Description string    `xml:"description"`
-	Link        string    `xml:"link"`
 	Items       []RSSItem `xml:"item"`
 	LastUpdated string    `xml:"lastBuildDate"`
 }
@@ -34,8 +35,6 @@ type RSSItem struct {
 }
 
 type Atom struct {
-	XMLName     xml.Name   `xml:"http://www.w3.org/2005/Atom feed"`
-	Title       string     `xml:"title"`
 	Items       []AtomItem `xml:"entry"`
 	LastUpdated string     `xml:"updated"`
 }
@@ -87,20 +86,24 @@ func parseDateWithFormat(dateStr string, knownFormat sql.NullString) (time.Time,
 	return parseDate(dateStr)
 }
 
-func getRSSFeed(url string) (string, []NormalizedItem, error) {
+func parseFeed[T RawFeed](url string, feed *T) error {
 	response, err := http.Get(url)
 	if err != nil {
-		return "", nil, fmt.Errorf("error fetching RSS feed: %v", err)
+		return fmt.Errorf("error fetching feed %s: %v", url, err)
 	}
 	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return "", nil, fmt.Errorf("error reading response body: %v", err)
+		return fmt.Errorf("error reading response body: %v", err)
 	}
 
+	return xml.Unmarshal(body, &feed)
+}
+
+func getRSSFeed(url string) (string, []NormalizedItem, error) {
 	var rss RSS
-	err = xml.Unmarshal(body, &rss)
+	err := parseFeed(url, &rss)
 	if err != nil {
 		return "", nil, fmt.Errorf("error parsing XML: %v", err)
 	}
@@ -117,21 +120,10 @@ func getRSSFeed(url string) (string, []NormalizedItem, error) {
 }
 
 func getAtomFeed(url string) (string, []NormalizedItem, error) {
-	response, err := http.Get(url)
-	if err != nil {
-		return "", nil, fmt.Errorf("Error fetching Atom feed: %v", err)
-	}
-	defer response.Body.Close()
-
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return "", nil, fmt.Errorf("Error reading response body: %v", err)
-	}
-
 	var atom Atom
-	err = xml.Unmarshal(body, &atom)
+	err := parseFeed(url, &atom)
 	if err != nil {
-		return "", nil, fmt.Errorf("Error parsing XML: %v", err)
+		return "", nil, fmt.Errorf("error parsing XML: %v", err)
 	}
 
 	items := make([]NormalizedItem, len(atom.Items))
