@@ -17,6 +17,13 @@ set
 where
   id = ?;
 
+-- name: UpdateFeedFormat :exec
+update feed
+set
+  date_format = ?
+where
+  id = ?;
+
 -- name: DeleteFeed :exec
 delete from feed
 where

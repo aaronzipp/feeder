@@ -14,6 +14,7 @@ type Feed struct {
 	LastUpdatedAt sql.NullString
 	Url           string
 	FeedType      string
+	DateFormat    sql.NullString
 }
 
 type Post struct {

@@ -76,7 +76,7 @@ func (q *Queries) DeletePost(ctx context.Context, id int64) error {
 
 const listFeeds = `-- name: ListFeeds :many
 select
-  id, name, last_updated_at, url, feed_type
+  id, name, last_updated_at, url, feed_type, date_format
 from
   feed
 `
@@ -96,6 +96,7 @@ func (q *Queries) ListFeeds(ctx context.Context) ([]Feed, error) {
 			&i.LastUpdatedAt,
 			&i.Url,
 			&i.FeedType,
+			&i.DateFormat,
 		); err != nil {
 			return nil, err
 		}
@@ -161,5 +162,23 @@ type UpdateFeedDateParams struct {
 
 func (q *Queries) UpdateFeedDate(ctx context.Context, arg UpdateFeedDateParams) error {
 	_, err := q.db.ExecContext(ctx, updateFeedDate, arg.LastUpdatedAt, arg.ID)
+	return err
+}
+
+const updateFeedFormat = `-- name: UpdateFeedFormat :exec
+update feed
+set
+  date_format = ?
+where
+  id = ?
+`
+
+type UpdateFeedFormatParams struct {
+	DateFormat sql.NullString
+	ID         int64
+}
+
+func (q *Queries) UpdateFeedFormat(ctx context.Context, arg UpdateFeedFormatParams) error {
+	_, err := q.db.ExecContext(ctx, updateFeedFormat, arg.DateFormat, arg.ID)
 	return err
 }

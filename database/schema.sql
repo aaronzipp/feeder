@@ -3,7 +3,8 @@ create table feed (
   name text not null,
   last_updated_at text,
   url text not null,
-  feed_type text check (feed_type in ('rss', 'atom', 'custom')) not null
+  feed_type text check (feed_type in ('rss', 'atom', 'custom')) not null,
+  date_format text
 );
 
 create table post (
