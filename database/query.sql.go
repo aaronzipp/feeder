@@ -20,7 +20,7 @@ values
 type CreateFeedParams struct {
 	Name     string
 	Url      string
-	FeedType sql.NullString
+	FeedType string
 }
 
 func (q *Queries) CreateFeed(ctx context.Context, arg CreateFeedParams) error {

@@ -13,7 +13,7 @@ type Feed struct {
 	Name          string
 	LastUpdatedAt sql.NullString
 	Url           string
-	FeedType      sql.NullString
+	FeedType      string
 }
 
 type Post struct {
