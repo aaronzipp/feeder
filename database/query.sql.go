@@ -28,6 +28,30 @@ func (q *Queries) CreateFeed(ctx context.Context, arg CreateFeedParams) error {
 	return err
 }
 
+const createPost = `-- name: CreatePost :exec
+insert or ignore into
+  post (title, url, published_at, feed_id)
+values
+  (?, ?, ?, ?)
+`
+
+type CreatePostParams struct {
+	Title       string
+	Url         string
+	PublishedAt string
+	FeedID      int64
+}
+
+func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) error {
+	_, err := q.db.ExecContext(ctx, createPost,
+		arg.Title,
+		arg.Url,
+		arg.PublishedAt,
+		arg.FeedID,
+	)
+	return err
+}
+
 const deleteFeed = `-- name: DeleteFeed :exec
 delete from feed
 where

@@ -28,6 +28,12 @@ select
 from
   post;
 
+-- name: CreatePost :exec
+insert or ignore into
+  post (title, url, published_at, feed_id)
+values
+  (?, ?, ?, ?);
+
 -- name: DeletePost :exec
 delete from post
 where

@@ -12,5 +12,6 @@ create table post (
   url text not null,
   published_at text not null,
   feed_id integer not null,
-  foreign key (feed_id) references feed (id) on delete cascade
+  foreign key (feed_id) references feed (id) on delete cascade,
+  unique(url, feed_id)
 );
