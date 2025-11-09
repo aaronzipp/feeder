@@ -147,6 +147,60 @@ func (q *Queries) ListPost(ctx context.Context) ([]Post, error) {
 	return items, nil
 }
 
+const listPostsWithFeed = `-- name: ListPostsWithFeed :many
+select
+  p.id,
+  p.title,
+  p.url,
+  p.published_at,
+  p.feed_id,
+  f.name as feed_name
+from
+  post p
+  inner join feed f on p.feed_id = f.id
+order by
+  p.published_at desc
+`
+
+type ListPostsWithFeedRow struct {
+	ID          int64
+	Title       string
+	Url         string
+	PublishedAt string
+	FeedID      int64
+	FeedName    string
+}
+
+func (q *Queries) ListPostsWithFeed(ctx context.Context) ([]ListPostsWithFeedRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPostsWithFeed)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPostsWithFeedRow
+	for rows.Next() {
+		var i ListPostsWithFeedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Url,
+			&i.PublishedAt,
+			&i.FeedID,
+			&i.FeedName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateFeedDate = `-- name: UpdateFeedDate :exec
 update feed
 set
