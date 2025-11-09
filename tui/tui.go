@@ -3,11 +3,13 @@ package tui
 import (
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"runtime"
 	"time"
 
 	"github.com/aaronzipp/feeder/database"
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -27,33 +29,136 @@ var (
 	dateStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#565f89")) // Tokyo Night comment
 
-	helpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#565f89")) // Tokyo Night comment
-
 	cursorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#f7768e")). // Tokyo Night red
 			Bold(true)
-
-	statusStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#565f89")) // Tokyo Night comment
-
-	postItemStyle = lipgloss.NewStyle().
-			MarginBottom(1)
 )
 
+// postItem implements list.Item and list.DefaultItem interfaces
+type postItem struct {
+	post database.ListPostsWithFeedRow
+}
+
+func (i postItem) FilterValue() string {
+	return i.post.Title + " " + i.post.FeedName
+}
+
+func (i postItem) Title() string {
+	return i.post.Title
+}
+
+func (i postItem) Description() string {
+	return i.post.FeedName + " • " + formatDate(i.post.PublishedAt)
+}
+
+// customDelegate renders items with Tokyo Night colors and tabular format
+type customDelegate struct {
+	list.DefaultDelegate
+}
+
+func (d customDelegate) Height() int {
+	return 1
+}
+
+func (d customDelegate) Spacing() int {
+	return 1
+}
+
+func (d customDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd {
+	return nil
+}
+
+func (d customDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	i, ok := item.(postItem)
+	if !ok {
+		return
+	}
+
+	// Calculate column widths based on visible items
+	maxTitleWidth := 0
+	maxFeedWidth := 0
+	maxDateWidth := 0
+
+	for _, visibleItem := range m.VisibleItems() {
+		if vi, ok := visibleItem.(postItem); ok {
+			titleLen := len(vi.post.Title)
+			feedLen := len(vi.post.FeedName)
+			dateLen := len(formatDate(vi.post.PublishedAt))
+
+			if titleLen > maxTitleWidth {
+				maxTitleWidth = titleLen
+			}
+			if feedLen > maxFeedWidth {
+				maxFeedWidth = feedLen
+			}
+			if dateLen > maxDateWidth {
+				maxDateWidth = dateLen
+			}
+		}
+	}
+
+	// Reserve space for cursor and spacing
+	availableWidth := m.Width() - 2 - 8
+	if maxTitleWidth > availableWidth-maxFeedWidth-maxDateWidth {
+		maxTitleWidth = availableWidth - maxFeedWidth - maxDateWidth
+		if maxTitleWidth < 20 {
+			maxTitleWidth = 20
+		}
+	}
+
+	cursor := "  "
+	if index == m.Index() {
+		cursor = cursorStyle.Render("❯ ")
+	}
+
+	// Truncate title if needed
+	title := i.post.Title
+	if len(title) > maxTitleWidth {
+		title = title[:maxTitleWidth-3] + "..."
+	}
+
+	// Format with fixed-width columns
+	titlePadded := fmt.Sprintf("%-*s", maxTitleWidth, title)
+	feedPadded := fmt.Sprintf("%-*s", maxFeedWidth, i.post.FeedName)
+	datePadded := fmt.Sprintf("%-*s", maxDateWidth, formatDate(i.post.PublishedAt))
+
+	// Apply styles
+	var styledTitle string
+	if index == m.Index() {
+		styledTitle = selectedStyle.Render(titlePadded)
+	} else {
+		styledTitle = titleStyle.Render(titlePadded)
+	}
+	styledFeed := feedNameStyle.Render(feedPadded)
+	styledDate := dateStyle.Render(datePadded)
+
+	fmt.Fprint(w, cursor+styledTitle+"  "+styledFeed+"  "+styledDate)
+}
+
 type model struct {
-	posts   []database.ListPostsWithFeedRow
-	cursor  int
-	err     error
-	width   int
-	height  int
+	list    list.Model
 	lastKey string
 }
 
 func InitialModel(posts []database.ListPostsWithFeedRow) model {
+	items := make([]list.Item, len(posts))
+	for i, post := range posts {
+		items[i] = postItem{post: post}
+	}
+
+	delegate := customDelegate{}
+
+	l := list.New(items, delegate, 0, 0)
+	l.Title = ""
+	l.SetShowTitle(false)
+	l.SetShowStatusBar(true)
+	l.SetShowHelp(true)
+	l.SetFilteringEnabled(true)
+	l.DisableQuitKeybindings()
+
 	return model{
-		posts:  posts,
-		cursor: 0,
+		list:    l,
+		lastKey: "",
 	}
 }
 
@@ -64,52 +169,87 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		// Calculate height needed for exactly 10 items per page
+		itemHeight := 1  // from delegate.Height()
+		itemSpacing := 1 // from delegate.Spacing()
+		desiredItems := 10
 
-	case tea.KeyMsg:
+		// Calculate chrome height based on enabled components
+		// The list component's updatePagination() subtracts these from available height:
+		// - statusView: typically 1 line when shown
+		// - paginationView: typically 1 line when shown
+		// - helpView: typically 2-3 lines when shown
+		// We add 1 extra for safe padding
+		chromeHeight := 0
+		if m.list.ShowStatusBar() {
+			chromeHeight += 1
+		}
+		// Pagination is shown by default
+		chromeHeight += 1
+		if m.list.ShowHelp() {
+			chromeHeight += 3 // Help view can be multiple lines
+		}
+		chromeHeight += 1 // Extra padding for safety
 
-		key := msg.String()
+		// Calculate the height that would give us exactly 10 items
+		// The formula mirrors what updatePagination does:
+		// availHeight = height - chrome
+		// PerPage = availHeight / (itemHeight + spacing)
+		// So: height = (PerPage * (itemHeight + spacing)) + chrome
+		itemsHeight := desiredItems * (itemHeight + itemSpacing)
+		constrainedHeight := itemsHeight + chromeHeight
 
-		if key != "g" {
-			defer func() {
-				m.lastKey = ""
-			}()
+		// Use the smaller of terminal height or our constrained height
+		height := msg.Height
+		if constrainedHeight < msg.Height {
+			height = constrainedHeight
 		}
 
-		switch key {
-		case "ctrl+c", "q":
-			return m, tea.Quit
+		m.list.SetSize(msg.Width, height)
 
-		case "j", "down":
-			if m.cursor < len(m.posts)-1 {
-				m.cursor++
+	case tea.KeyMsg:
+		key := msg.String()
+
+		// Filter guard: only intercept keys when NOT filtering
+		if !m.list.SettingFilter() {
+			// Reset lastKey for non-g keys
+			if key != "g" {
+				defer func() {
+					m.lastKey = ""
+				}()
 			}
 
-		case "k", "up":
-			if m.cursor > 0 {
-				m.cursor--
-			}
+			switch key {
+			case "ctrl+c", "q":
+				return m, tea.Quit
 
-		case "g":
-			if m.lastKey == "g" {
-				m.cursor = 0
-				m.lastKey = ""
-			} else {
-				m.lastKey = "g"
-			}
+			case "g":
+				if m.lastKey == "g" {
+					m.list.Select(0)
+					m.lastKey = ""
+					return m, nil
+				} else {
+					m.lastKey = "g"
+					return m, nil
+				}
 
-		case "G":
-			m.cursor = len(m.posts) - 1
+			case "G":
+				m.list.Select(len(m.list.Items()) - 1)
+				return m, nil
 
-		case "enter":
-			if len(m.posts) > 0 && m.cursor < len(m.posts) {
-				go openBrowser(m.posts[m.cursor].Url)
+			case "enter":
+				if item, ok := m.list.SelectedItem().(postItem); ok {
+					go openBrowser(item.post.Url)
+				}
+				return m, nil
 			}
 		}
 	}
 
-	return m, nil
+	// Let the list handle all other keys
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
 }
 
 func formatDate(dateStr string) string {
@@ -137,110 +277,7 @@ func formatDate(dateStr string) string {
 }
 
 func (m model) View() string {
-	if m.err != nil {
-		return fmt.Sprintf("Error: %v\n\nPress q to quit.\n", m.err)
-	}
-
-	if len(m.posts) == 0 {
-		return "No posts found.\n\nPress q to quit.\n"
-	}
-
-	var s string
-
-	// Calculate how many posts can fit on screen
-	// Header takes 3 lines, status takes 2 lines, each post takes 2 lines (with margin)
-	availableHeight := m.height - 2
-	windowSize := min(max(availableHeight/2, 1), len(m.posts))
-
-	// Show a window of posts around the cursor
-	start := 0
-	end := len(m.posts)
-
-	// If there are many posts, show a window around the cursor
-	if len(m.posts) > windowSize {
-		start = max(m.cursor-windowSize/2, 0)
-		end = start + windowSize
-		if end > len(m.posts) {
-			end = len(m.posts)
-			start = max(end-windowSize, 0)
-		}
-	} else {
-		end = len(m.posts)
-	}
-
-	// Calculate column widths for tabular display
-	maxTitleWidth := 0
-	maxFeedWidth := 0
-	maxDateWidth := 0
-
-	for i := start; i < end; i++ {
-		post := m.posts[i]
-		titleLen := len(post.Title)
-		feedLen := len(post.FeedName)
-		dateLen := len(formatDate(post.PublishedAt))
-
-		if titleLen > maxTitleWidth {
-			maxTitleWidth = titleLen
-		}
-		if feedLen > maxFeedWidth {
-			maxFeedWidth = feedLen
-		}
-		if dateLen > maxDateWidth {
-			maxDateWidth = dateLen
-		}
-	}
-
-	// Reserve space for cursor (2 chars) + column spacing (4 chars between columns)
-	// and ensure title doesn't take up too much space
-	availableWidth := m.width - 2 - 8 // cursor + spacing
-	if maxTitleWidth > availableWidth-maxFeedWidth-maxDateWidth {
-		maxTitleWidth = availableWidth - maxFeedWidth - maxDateWidth
-		if maxTitleWidth < 20 {
-			maxTitleWidth = 20 // minimum title width
-		}
-	}
-
-	for i := start; i < end; i++ {
-		post := m.posts[i]
-
-		cursor := "  "
-		if m.cursor == i {
-			cursor = cursorStyle.Render("❯ ")
-		}
-
-		// Truncate title if needed
-		title := post.Title
-		if len(title) > maxTitleWidth {
-			title = title[:maxTitleWidth-3] + "..."
-		}
-
-		// Format with fixed-width columns (left-aligned)
-		titlePadded := fmt.Sprintf("%-*s", maxTitleWidth, title)
-		feedPadded := fmt.Sprintf("%-*s", maxFeedWidth, post.FeedName)
-		datePadded := fmt.Sprintf("%-*s", maxDateWidth, formatDate(post.PublishedAt))
-
-		// Apply styles to padded strings
-		var styledTitle string
-		if m.cursor == i {
-			styledTitle = selectedStyle.Render(titlePadded)
-		} else {
-			styledTitle = titleStyle.Render(titlePadded)
-		}
-		styledFeed := feedNameStyle.Render(feedPadded)
-		styledDate := dateStyle.Render(datePadded)
-
-		postContent := cursor + styledTitle + "  " + styledFeed + "  " + styledDate
-		s += postItemStyle.Render(postContent) + "\n"
-	}
-
-	s += "\n" + statusStyle.Render(
-		fmt.Sprintf("Showing %d-%d of %d posts", start+1, end, len(m.posts)),
-	) + "\n"
-	s += helpStyle.Render(
-		"Navigate: j/k (or ↑/↓) • Open: Enter • To top: gg • To bottom: G • Quit: q",
-	)
-
-	return s
+	return m.list.View()
 }
 
 // openBrowser opens the specified URL in the default browser
