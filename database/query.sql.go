@@ -10,6 +10,19 @@ import (
 	"database/sql"
 )
 
+const archivePost = `-- name: ArchivePost :exec
+update post
+set
+  is_archived = 1
+where
+  id = ?
+`
+
+func (q *Queries) ArchivePost(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, archivePost, id)
+	return err
+}
+
 const createFeed = `-- name: CreateFeed :exec
 insert into
   feed (name, url, feed_type)
@@ -74,63 +87,6 @@ func (q *Queries) DeletePost(ctx context.Context, id int64) error {
 	return err
 }
 
-const listArchive = `-- name: ListArchive :many
-select
-  p.id,
-  p.title,
-  p.url,
-  p.published_at,
-  p.feed_id,
-  f.name as feed_name
-from
-  post p
-  inner join feed f on p.feed_id = f.id
-where
-  is_archived
-  and not is_starred
-order by
-  p.published_at desc
-`
-
-type ListArchiveRow struct {
-	ID          int64
-	Title       string
-	Url         string
-	PublishedAt string
-	FeedID      int64
-	FeedName    string
-}
-
-func (q *Queries) ListArchive(ctx context.Context) ([]ListArchiveRow, error) {
-	rows, err := q.db.QueryContext(ctx, listArchive)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListArchiveRow
-	for rows.Next() {
-		var i ListArchiveRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Title,
-			&i.Url,
-			&i.PublishedAt,
-			&i.FeedID,
-			&i.FeedName,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listFeeds = `-- name: ListFeeds :many
 select
   id, name, last_updated_at, url, feed_type, date_format
@@ -154,63 +110,6 @@ func (q *Queries) ListFeeds(ctx context.Context) ([]Feed, error) {
 			&i.Url,
 			&i.FeedType,
 			&i.DateFormat,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listInbox = `-- name: ListInbox :many
-select
-  p.id,
-  p.title,
-  p.url,
-  p.published_at,
-  p.feed_id,
-  f.name as feed_name
-from
-  post p
-  inner join feed f on p.feed_id = f.id
-where
-  not is_archived
-  and not is_starred
-order by
-  p.published_at desc
-`
-
-type ListInboxRow struct {
-	ID          int64
-	Title       string
-	Url         string
-	PublishedAt string
-	FeedID      int64
-	FeedName    string
-}
-
-func (q *Queries) ListInbox(ctx context.Context) ([]ListInboxRow, error) {
-	rows, err := q.db.QueryContext(ctx, listInbox)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListInboxRow
-	for rows.Next() {
-		var i ListInboxRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Title,
-			&i.Url,
-			&i.PublishedAt,
-			&i.FeedID,
-			&i.FeedName,
 		); err != nil {
 			return nil, err
 		}
@@ -317,47 +216,59 @@ func (q *Queries) ListPostsWithFeed(ctx context.Context) ([]ListPostsWithFeedRow
 	return items, nil
 }
 
-const listStarred = `-- name: ListStarred :many
+const listPostsWithFeedFiltered = `-- name: ListPostsWithFeedFiltered :many
 select
   p.id,
   p.title,
   p.url,
   p.published_at,
   p.feed_id,
+  p.is_archived,
+  p.is_starred,
   f.name as feed_name
 from
   post p
   inner join feed f on p.feed_id = f.id
 where
-  is_starred
+  (?1 IS NULL OR p.is_archived = ?1)
+  AND (?2 IS NULL OR p.is_starred = ?2)
 order by
   p.published_at desc
 `
 
-type ListStarredRow struct {
+type ListPostsWithFeedFilteredParams struct {
+	IsArchived interface{}
+	IsStarred  interface{}
+}
+
+type ListPostsWithFeedFilteredRow struct {
 	ID          int64
 	Title       string
 	Url         string
 	PublishedAt string
 	FeedID      int64
+	IsArchived  sql.NullInt64
+	IsStarred   sql.NullInt64
 	FeedName    string
 }
 
-func (q *Queries) ListStarred(ctx context.Context) ([]ListStarredRow, error) {
-	rows, err := q.db.QueryContext(ctx, listStarred)
+func (q *Queries) ListPostsWithFeedFiltered(ctx context.Context, arg ListPostsWithFeedFilteredParams) ([]ListPostsWithFeedFilteredRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPostsWithFeedFiltered, arg.IsArchived, arg.IsStarred)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListStarredRow
+	var items []ListPostsWithFeedFilteredRow
 	for rows.Next() {
-		var i ListStarredRow
+		var i ListPostsWithFeedFilteredRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Title,
 			&i.Url,
 			&i.PublishedAt,
 			&i.FeedID,
+			&i.IsArchived,
+			&i.IsStarred,
 			&i.FeedName,
 		); err != nil {
 			return nil, err
@@ -371,6 +282,45 @@ func (q *Queries) ListStarred(ctx context.Context) ([]ListStarredRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const starPost = `-- name: StarPost :exec
+update post
+set
+  is_starred = 1
+where
+  id = ?
+`
+
+func (q *Queries) StarPost(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, starPost, id)
+	return err
+}
+
+const unarchivePost = `-- name: UnarchivePost :exec
+update post
+set
+  is_archived = 0
+where
+  id = ?
+`
+
+func (q *Queries) UnarchivePost(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, unarchivePost, id)
+	return err
+}
+
+const unstarPost = `-- name: UnstarPost :exec
+update post
+set
+  is_starred = 0
+where
+  id = ?
+`
+
+func (q *Queries) UnstarPost(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, unstarPost, id)
+	return err
 }
 
 const updateFeedDate = `-- name: UpdateFeedDate :exec

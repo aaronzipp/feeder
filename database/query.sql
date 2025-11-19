@@ -60,78 +60,47 @@ from
 order by
   p.published_at desc;
 
--- name: ListInbox :many
+-- name: ListPostsWithFeedFiltered :many
 select
   p.id,
   p.title,
   p.url,
   p.published_at,
   p.feed_id,
+  p.is_archived,
+  p.is_starred,
   f.name as feed_name
 from
   post p
   inner join feed f on p.feed_id = f.id
 where
-  not is_archived
-  and not is_starred
+  (sqlc.narg('is_archived') IS NULL OR p.is_archived = sqlc.narg('is_archived'))
+  AND (sqlc.narg('is_starred') IS NULL OR p.is_starred = sqlc.narg('is_starred'))
 order by
   p.published_at desc;
 
--- name: ListArchive :many
-select
-  p.id,
-  p.title,
-  p.url,
-  p.published_at,
-  p.feed_id,
-  f.name as feed_name
-from
-  post p
-  inner join feed f on p.feed_id = f.id
-where
-  is_archived
-  and not is_starred
-order by
-  p.published_at desc;
-
--- name: ListStarred :many
-select
-  p.id,
-  p.title,
-  p.url,
-  p.published_at,
-  p.feed_id,
-  f.name as feed_name
-from
-  post p
-  inner join feed f on p.feed_id = f.id
-where
-  is_starred
-order by
-  p.published_at desc;
-
--- ArchivePost :exec
+-- name: ArchivePost :exec
 update post
 set
   is_archived = 1
 where
   id = ?;
 
--- UnarchivePost :exec
+-- name: UnarchivePost :exec
 update post
 set
   is_archived = 0
 where
   id = ?;
 
--- StarPost :exec
+-- name: StarPost :exec
 update post
 set
   is_starred = 1
 where
   id = ?;
 
--- UnstarPost :exec
+-- name: UnstarPost :exec
 update post
 set
   is_starred = 0

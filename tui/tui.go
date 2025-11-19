@@ -36,7 +36,7 @@ var (
 
 // postItem implements list.Item and list.DefaultItem interfaces
 type postItem struct {
-	post database.ListPostsWithFeedRow
+	post database.PostWithFeed
 }
 
 func (i postItem) FilterValue() string {
@@ -140,7 +140,7 @@ type model struct {
 	lastKey string
 }
 
-func InitialModel(posts []database.ListPostsWithFeedRow) model {
+func InitialModel(posts []database.PostWithFeed) model {
 	items := make([]list.Item, len(posts))
 	for i, post := range posts {
 		items[i] = postItem{post: post}
@@ -303,7 +303,7 @@ func openBrowser(url string) error {
 
 // Run starts the TUI application
 func Run(ctx context.Context, queries *database.Queries) error {
-	posts, err := queries.ListPostsWithFeed(ctx)
+	posts, err := queries.ListInbox(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch posts: %w", err)
 	}
