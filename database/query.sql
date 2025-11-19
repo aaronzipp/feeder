@@ -109,3 +109,31 @@ where
   is_starred
 order by
   p.published_at desc;
+
+-- ArchivePost :exec
+update post
+set
+  is_archived = 1
+where
+  id = ?;
+
+-- UnarchivePost :exec
+update post
+set
+  is_archived = 0
+where
+  id = ?;
+
+-- StarPost :exec
+update post
+set
+  is_starred = 1
+where
+  id = ?;
+
+-- UnstarPost :exec
+update post
+set
+  is_starred = 0
+where
+  id = ?;
