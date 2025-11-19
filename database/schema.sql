@@ -13,6 +13,8 @@ create table post (
   url text not null,
   published_at text not null,
   feed_id integer not null,
+  is_archived integer default 0,
+  is_starred integer default 0,
   foreign key (feed_id) references feed (id) on delete cascade,
-  unique(url, feed_id)
+  unique (url, feed_id)
 );

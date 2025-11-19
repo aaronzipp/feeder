@@ -113,7 +113,7 @@ func (q *Queries) ListFeeds(ctx context.Context) ([]Feed, error) {
 
 const listPost = `-- name: ListPost :many
 select
-  id, title, url, published_at, feed_id
+  id, title, url, published_at, feed_id, is_archived, is_starred
 from
   post
 `
@@ -133,6 +133,8 @@ func (q *Queries) ListPost(ctx context.Context) ([]Post, error) {
 			&i.Url,
 			&i.PublishedAt,
 			&i.FeedID,
+			&i.IsArchived,
+			&i.IsStarred,
 		); err != nil {
 			return nil, err
 		}

@@ -23,4 +23,6 @@ type Post struct {
 	Url         string
 	PublishedAt string
 	FeedID      int64
+	IsArchived  sql.NullInt64
+	IsStarred   sql.NullInt64
 }
