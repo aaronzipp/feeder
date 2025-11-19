@@ -29,8 +29,8 @@ func (q *Queries) CreateFeed(ctx context.Context, arg CreateFeedParams) error {
 }
 
 const createPost = `-- name: CreatePost :exec
-insert or ignore into
-  post (title, url, published_at, feed_id)
+insert
+or ignore into post (title, url, published_at, feed_id)
 values
   (?, ?, ?, ?)
 `
@@ -74,6 +74,63 @@ func (q *Queries) DeletePost(ctx context.Context, id int64) error {
 	return err
 }
 
+const listArchive = `-- name: ListArchive :many
+select
+  p.id,
+  p.title,
+  p.url,
+  p.published_at,
+  p.feed_id,
+  f.name as feed_name
+from
+  post p
+  inner join feed f on p.feed_id = f.id
+where
+  is_archived
+  and not is_starred
+order by
+  p.published_at desc
+`
+
+type ListArchiveRow struct {
+	ID          int64
+	Title       string
+	Url         string
+	PublishedAt string
+	FeedID      int64
+	FeedName    string
+}
+
+func (q *Queries) ListArchive(ctx context.Context) ([]ListArchiveRow, error) {
+	rows, err := q.db.QueryContext(ctx, listArchive)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListArchiveRow
+	for rows.Next() {
+		var i ListArchiveRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Url,
+			&i.PublishedAt,
+			&i.FeedID,
+			&i.FeedName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFeeds = `-- name: ListFeeds :many
 select
   id, name, last_updated_at, url, feed_type, date_format
@@ -97,6 +154,63 @@ func (q *Queries) ListFeeds(ctx context.Context) ([]Feed, error) {
 			&i.Url,
 			&i.FeedType,
 			&i.DateFormat,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInbox = `-- name: ListInbox :many
+select
+  p.id,
+  p.title,
+  p.url,
+  p.published_at,
+  p.feed_id,
+  f.name as feed_name
+from
+  post p
+  inner join feed f on p.feed_id = f.id
+where
+  not is_archived
+  and not is_starred
+order by
+  p.published_at desc
+`
+
+type ListInboxRow struct {
+	ID          int64
+	Title       string
+	Url         string
+	PublishedAt string
+	FeedID      int64
+	FeedName    string
+}
+
+func (q *Queries) ListInbox(ctx context.Context) ([]ListInboxRow, error) {
+	rows, err := q.db.QueryContext(ctx, listInbox)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListInboxRow
+	for rows.Next() {
+		var i ListInboxRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Url,
+			&i.PublishedAt,
+			&i.FeedID,
+			&i.FeedName,
 		); err != nil {
 			return nil, err
 		}
@@ -182,6 +296,62 @@ func (q *Queries) ListPostsWithFeed(ctx context.Context) ([]ListPostsWithFeedRow
 	var items []ListPostsWithFeedRow
 	for rows.Next() {
 		var i ListPostsWithFeedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Url,
+			&i.PublishedAt,
+			&i.FeedID,
+			&i.FeedName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStarred = `-- name: ListStarred :many
+select
+  p.id,
+  p.title,
+  p.url,
+  p.published_at,
+  p.feed_id,
+  f.name as feed_name
+from
+  post p
+  inner join feed f on p.feed_id = f.id
+where
+  is_starred
+order by
+  p.published_at desc
+`
+
+type ListStarredRow struct {
+	ID          int64
+	Title       string
+	Url         string
+	PublishedAt string
+	FeedID      int64
+	FeedName    string
+}
+
+func (q *Queries) ListStarred(ctx context.Context) ([]ListStarredRow, error) {
+	rows, err := q.db.QueryContext(ctx, listStarred)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStarredRow
+	for rows.Next() {
+		var i ListStarredRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Title,

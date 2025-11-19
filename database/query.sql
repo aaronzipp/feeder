@@ -36,8 +36,8 @@ from
   post;
 
 -- name: CreatePost :exec
-insert or ignore into
-  post (title, url, published_at, feed_id)
+insert
+or ignore into post (title, url, published_at, feed_id)
 values
   (?, ?, ?, ?);
 
@@ -57,5 +57,55 @@ select
 from
   post p
   inner join feed f on p.feed_id = f.id
+order by
+  p.published_at desc;
+
+-- name: ListInbox :many
+select
+  p.id,
+  p.title,
+  p.url,
+  p.published_at,
+  p.feed_id,
+  f.name as feed_name
+from
+  post p
+  inner join feed f on p.feed_id = f.id
+where
+  not is_archived
+  and not is_starred
+order by
+  p.published_at desc;
+
+-- name: ListArchive :many
+select
+  p.id,
+  p.title,
+  p.url,
+  p.published_at,
+  p.feed_id,
+  f.name as feed_name
+from
+  post p
+  inner join feed f on p.feed_id = f.id
+where
+  is_archived
+  and not is_starred
+order by
+  p.published_at desc;
+
+-- name: ListStarred :many
+select
+  p.id,
+  p.title,
+  p.url,
+  p.published_at,
+  p.feed_id,
+  f.name as feed_name
+from
+  post p
+  inner join feed f on p.feed_id = f.id
+where
+  is_starred
 order by
   p.published_at desc;
