@@ -135,12 +135,112 @@ func (d customDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 	fmt.Fprint(w, cursor+styledTitle+"  "+styledFeed+"  "+styledDate)
 }
 
-type model struct {
-	list    list.Model
-	lastKey string
+type screenType int
+
+const (
+	screenInbox screenType = iota
+	screenArchive
+	screenStarred
+)
+
+func (s screenType) String() string {
+	switch s {
+	case screenInbox:
+		return "inbox"
+	case screenArchive:
+		return "archive"
+	case screenStarred:
+		return "starred"
+	default:
+		return "unknown"
+	}
 }
 
-func InitialModel(posts []database.PostWithFeed) model {
+type loadPostsMsg struct {
+	posts []database.PostWithFeed
+	err   error
+}
+
+type archivePostMsg struct {
+	postID int64
+	err    error
+}
+
+type unarchivePostMsg struct {
+	postID int64
+	err    error
+}
+
+type starPostMsg struct {
+	postID int64
+	err    error
+}
+
+type unstarPostMsg struct {
+	postID int64
+	err    error
+}
+
+type model struct {
+	list          list.Model
+	currentScreen screenType
+	queries       *database.Queries
+	ctx           context.Context
+	lastKey       string
+}
+
+func loadPostsCmd(ctx context.Context, queries *database.Queries, screen screenType) tea.Cmd {
+	return func() tea.Msg {
+		var posts []database.PostWithFeed
+		var err error
+
+		switch screen {
+		case screenInbox:
+			posts, err = queries.ListInbox(ctx)
+		case screenArchive:
+			posts, err = queries.ListArchive(ctx)
+		case screenStarred:
+			posts, err = queries.ListStarred(ctx)
+		}
+
+		return loadPostsMsg{posts: posts, err: err}
+	}
+}
+
+func archivePostCmd(ctx context.Context, queries *database.Queries, postID int64) tea.Cmd {
+	return func() tea.Msg {
+		err := queries.ArchivePost(ctx, postID)
+		return archivePostMsg{postID: postID, err: err}
+	}
+}
+
+func unarchivePostCmd(ctx context.Context, queries *database.Queries, postID int64) tea.Cmd {
+	return func() tea.Msg {
+		err := queries.UnarchivePost(ctx, postID)
+		return unarchivePostMsg{postID: postID, err: err}
+	}
+}
+
+func starPostCmd(ctx context.Context, queries *database.Queries, postID int64) tea.Cmd {
+	return func() tea.Msg {
+		err := queries.StarPost(ctx, postID)
+		return starPostMsg{postID: postID, err: err}
+	}
+}
+
+func unstarPostCmd(ctx context.Context, queries *database.Queries, postID int64) tea.Cmd {
+	return func() tea.Msg {
+		err := queries.UnstarPost(ctx, postID)
+		err = fmt.Errorf("%w, %w", err, queries.ArchivePost(ctx, postID))
+		return unstarPostMsg{postID: postID, err: err}
+	}
+}
+
+func InitialModel(
+	ctx context.Context,
+	queries *database.Queries,
+	posts []database.PostWithFeed,
+) model {
 	items := make([]list.Item, len(posts))
 	for i, post := range posts {
 		items[i] = postItem{post: post}
@@ -149,16 +249,21 @@ func InitialModel(posts []database.PostWithFeed) model {
 	delegate := customDelegate{}
 
 	l := list.New(items, delegate, 0, 0)
-	l.Title = ""
-	l.SetShowTitle(false)
+	l.Styles.Title = lipgloss.NewStyle()
 	l.SetShowStatusBar(true)
 	l.SetShowHelp(true)
 	l.SetFilteringEnabled(true)
 	l.DisableQuitKeybindings()
 
+	// Remove background color from title
+	l.Styles.Title = lipgloss.NewStyle()
+
 	return model{
-		list:    l,
-		lastKey: "",
+		list:          l,
+		currentScreen: screenInbox,
+		queries:       queries,
+		ctx:           ctx,
+		lastKey:       "",
 	}
 }
 
@@ -207,6 +312,55 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.list.SetSize(msg.Width, height)
 
+	case loadPostsMsg:
+		if msg.err != nil {
+			return m, nil
+		}
+		oldCursor := m.list.Index()
+
+		// Update list with new posts
+		items := make([]list.Item, len(msg.posts))
+		for i, post := range msg.posts {
+			items[i] = postItem{post: post}
+		}
+		m.list.SetItems(items)
+
+		if oldCursor >= len(items) && len(items) > 0 {
+			m.list.Select(len(items) - 1)
+		} else {
+			m.list.Select(oldCursor)
+		}
+
+		return m, nil
+
+	case archivePostMsg:
+		if msg.err != nil {
+			return m, nil
+		}
+		// Reload the current screen to reflect the change
+		return m, loadPostsCmd(m.ctx, m.queries, m.currentScreen)
+
+	case unarchivePostMsg:
+		if msg.err != nil {
+			return m, nil
+		}
+		// Reload the current screen to reflect the change
+		return m, loadPostsCmd(m.ctx, m.queries, m.currentScreen)
+
+	case starPostMsg:
+		if msg.err != nil {
+			return m, nil
+		}
+		// Reload the current screen to reflect the change
+		return m, loadPostsCmd(m.ctx, m.queries, m.currentScreen)
+
+	case unstarPostMsg:
+		if msg.err != nil {
+			return m, nil
+		}
+		// Reload the current screen to reflect the change
+		return m, loadPostsCmd(m.ctx, m.queries, m.currentScreen)
+
 	case tea.KeyMsg:
 		key := msg.String()
 
@@ -233,9 +387,54 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 
+			case "1":
+				if m.currentScreen != screenInbox {
+					m.currentScreen = screenInbox
+					return m, loadPostsCmd(m.ctx, m.queries, screenInbox)
+				}
+
+			case "2":
+				if m.currentScreen != screenStarred {
+					m.currentScreen = screenStarred
+					return m, loadPostsCmd(m.ctx, m.queries, screenStarred)
+				}
+
+			case "3":
+				if m.currentScreen != screenArchive {
+					m.currentScreen = screenArchive
+					return m, loadPostsCmd(m.ctx, m.queries, screenArchive)
+				}
+
 			case "G":
 				m.list.Select(len(m.list.Items()) - 1)
 				return m, nil
+
+			case "x":
+				if m.currentScreen == screenArchive {
+					return m, nil
+				}
+				if item, ok := m.list.SelectedItem().(postItem); ok {
+					return m, archivePostCmd(m.ctx, m.queries, item.post.ID)
+				}
+
+			case "u":
+				if m.currentScreen == screenArchive {
+					if item, ok := m.list.SelectedItem().(postItem); ok {
+						return m, unarchivePostCmd(m.ctx, m.queries, item.post.ID)
+					}
+				}
+				if m.currentScreen == screenStarred {
+					if item, ok := m.list.SelectedItem().(postItem); ok {
+						return m, unstarPostCmd(m.ctx, m.queries, item.post.ID)
+					}
+				}
+
+			case "s":
+				if m.currentScreen != screenStarred {
+					if item, ok := m.list.SelectedItem().(postItem); ok {
+						return m, starPostCmd(m.ctx, m.queries, item.post.ID)
+					}
+				}
 
 			case "enter":
 				if item, ok := m.list.SelectedItem().(postItem); ok {
@@ -277,6 +476,15 @@ func formatDate(dateStr string) string {
 }
 
 func (m model) View() string {
+	switch m.currentScreen {
+	case screenInbox:
+		m.list.Title = "📬 Inbox"
+	case screenArchive:
+		m.list.Title = "📦 Archive"
+	case screenStarred:
+		m.list.Title = "⭐ Starred"
+	}
+
 	return m.list.View()
 }
 
@@ -309,7 +517,7 @@ func Run(ctx context.Context, queries *database.Queries) error {
 	}
 
 	p := tea.NewProgram(
-		InitialModel(posts),
+		InitialModel(ctx, queries, posts),
 		tea.WithAltScreen(),
 	)
 	_, err = p.Run()

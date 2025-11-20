@@ -46,20 +46,6 @@ delete from post
 where
   id = ?;
 
--- name: ListPostsWithFeed :many
-select
-  p.id,
-  p.title,
-  p.url,
-  p.published_at,
-  p.feed_id,
-  f.name as feed_name
-from
-  post p
-  inner join feed f on p.feed_id = f.id
-order by
-  p.published_at desc;
-
 -- name: ListPostsWithFeedFiltered :many
 select
   p.id,
