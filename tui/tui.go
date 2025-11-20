@@ -100,10 +100,7 @@ func (d customDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 	// Reserve space for cursor and spacing
 	availableWidth := m.Width() - 2 - 8
 	if maxTitleWidth > availableWidth-maxFeedWidth-maxDateWidth {
-		maxTitleWidth = availableWidth - maxFeedWidth - maxDateWidth
-		if maxTitleWidth < 20 {
-			maxTitleWidth = 20
-		}
+		maxTitleWidth = max(20, availableWidth-maxFeedWidth-maxDateWidth)
 	}
 
 	cursor := "  "
@@ -305,10 +302,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		constrainedHeight := itemsHeight + chromeHeight
 
 		// Use the smaller of terminal height or our constrained height
-		height := msg.Height
-		if constrainedHeight < msg.Height {
-			height = constrainedHeight
-		}
+		height := max(msg.Height, constrainedHeight)
 
 		m.list.SetSize(msg.Width, height)
 
