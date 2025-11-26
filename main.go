@@ -43,6 +43,7 @@ type AtomItem struct {
 	Title     string   `xml:"title"`
 	Link      AtomLink `xml:"link"`
 	Published string   `xml:"published"`
+	Updated   string   `xml:"updated"`
 }
 
 type AtomLink struct {
@@ -128,10 +129,15 @@ func getAtomFeed(url string) (string, []NormalizedItem, error) {
 
 	items := make([]NormalizedItem, len(atom.Items))
 	for i, item := range atom.Items {
+		// Prefer Published over Updated, but use Updated as fallback
+		dateStr := item.Published
+		if dateStr == "" {
+			dateStr = item.Updated
+		}
 		items[i] = NormalizedItem{
 			Title:     item.Title,
 			URL:       item.Link.Href,
-			Published: item.Published,
+			Published: dateStr,
 		}
 	}
 	return atom.LastUpdated, items, nil
