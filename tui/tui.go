@@ -308,7 +308,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		constrainedHeight := itemsHeight + chromeHeight
 
 		// Use the smaller of terminal height or our constrained height
-		height := max(msg.Height, constrainedHeight)
+		height := min(msg.Height, constrainedHeight)
 
 		m.list.SetSize(msg.Width, height)
 
