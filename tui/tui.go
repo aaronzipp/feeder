@@ -227,9 +227,15 @@ func starPostCmd(ctx context.Context, queries *database.Queries, postID int64) t
 
 func unstarPostCmd(ctx context.Context, queries *database.Queries, postID int64) tea.Cmd {
 	return func() tea.Msg {
-		err := queries.UnstarPost(ctx, postID)
-		err = fmt.Errorf("%w, %w", err, queries.ArchivePost(ctx, postID))
-		return unstarPostMsg{postID: postID, err: err}
+		if err := queries.UnstarPost(ctx, postID); err != nil {
+			return unstarPostMsg{postID: postID, err: err}
+		}
+
+		if err := queries.ArchivePost(ctx, postID); err != nil {
+			return unstarPostMsg{postID: postID, err: err}
+		}
+
+		return unstarPostMsg{postID: postID, err: nil}
 	}
 }
 
